@@ -4878,6 +4878,7 @@ union bpf_attr {
  *	Return
  *		A pointer to struct pt_regs.
  */
+// add faccount_func, modified by yzh
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
 	FN(map_lookup_elem),		\
@@ -5055,6 +5056,7 @@ union bpf_attr {
 	FN(get_func_ip),		\
 	FN(get_attach_cookie),		\
 	FN(task_pt_regs),		\
+	FN(faccount_func), 		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
