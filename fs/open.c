@@ -34,6 +34,8 @@
 #include <linux/compat.h>
 #include <linux/mnt_idmapping.h>
 
+#include <linux/atomic.h> /////////////////////////////
+
 #include "internal.h"
 
 int do_truncate(struct user_namespace *mnt_userns, struct dentry *dentry,
@@ -1215,6 +1217,8 @@ static long do_sys_openat2(int dfd, const char __user *filename,
 		} else {
 			fsnotify_open(f);
 			fd_install(fd, f);
+			f->find_page_count = 0; /////////////////////
+			f->all_accessed_count = 0; /////////////////////
 		}
 	}
 	putname(tmp);

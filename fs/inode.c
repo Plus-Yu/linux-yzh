@@ -23,6 +23,10 @@
 #include <trace/events/writeback.h>
 #include "internal.h"
 
+#include <linux/atomic.h> ///////////////////////////////////////////////////////////////////////
+
+#include <linux/slab.h> /////////////////////////////////////////////////////////////////////////
+
 /*
  * Inode locking rules:
  *
@@ -133,6 +137,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	static const struct inode_operations empty_iops;
 	static const struct file_operations no_open_fops = {.open = no_open};
 	struct address_space *const mapping = &inode->i_data;
+	int i; ///////////////////////////////////////////////////////////////////
 
 	inode->i_sb = sb;
 	inode->i_blkbits = sb->s_blocksize_bits;
@@ -182,6 +187,18 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 		__set_bit(AS_THP_SUPPORT, &mapping->flags);
 	mapping->wb_err = 0;
 	atomic_set(&mapping->i_mmap_writable, 0);
+	atomic_set(
+		&mapping->access_count,
+		0); //////////////////////////////////////////////////////////////////////////
+
+	printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR:access_count init");
+
+	for (i = 0; i < 25; i++) {
+		atomic_set(&(mapping->accessed_cgroups[i]), -1);
+
+	} //////////////////////////////////////////////////////////////////////
+
+	printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR:accessed_cgroups init");
 #ifdef CONFIG_READ_ONLY_THP_FOR_FS
 	atomic_set(&mapping->nr_thps, 0);
 #endif

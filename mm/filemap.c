@@ -45,9 +45,13 @@
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
+#include "linux/bpf.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/filemap.h>
+
+#include <linux/atomic.h> ///////////////////////
+#include <linux/memcontrol.h> ///////////////////////
 
 /*
  * FIXME: remove all knowledge of the buffer layer from the core VM
@@ -2527,6 +2531,37 @@ static int filemap_readahead(struct kiocb *iocb, struct file *file,
 	return 0;
 }
 
+/*get accessed_cgroups*///////////////////////////////////////////////////////////////////////////////////
+int get_accessed_cgroups(struct address_space *ads){
+	int num=0;
+	int flag=0;
+	struct mem_cgroup *cur=get_mem_cgroup_from_mm(current->mm);
+	int cur_id=cur->id.id;
+	int i;
+	printk("invoking get_accessed_cgroups,self cgroup:%d\n",cur_id);
+	for(i=0;i<25;i++){
+		if(atomic_read(&(ads->accessed_cgroups[i]))==-1){
+			break;
+		}
+		if(cur_id!=atomic_read(&(ads->accessed_cgroups[i]))){
+			num++;
+			printk("cgroup:%d id:%d num:%d",i,atomic_read(&(ads->accessed_cgroups[i])),num);
+		}
+		if(cur_id==atomic_read(&(ads->accessed_cgroups[i]))){
+			flag=1;
+		}
+	}
+	if((num<25)&&(flag==0))
+		{
+			atomic_set(&(ads->accessed_cgroups[num]),cur_id);
+			//ads->accessed_cgroups[num]=cur_id;
+			num++;
+			printk("cgroup added,length:%d id:%d\n",num,cur_id);
+		}
+	printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR accessed_cgroup number:%d\n",num);
+	return num;
+}//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 static int filemap_get_pages(struct kiocb *iocb, struct iov_iter *iter,
 		struct pagevec *pvec)
 {
@@ -2561,6 +2596,34 @@ retry:
 			goto retry;
 		return err;
 	}
+	else { ////////////////////////////////////////////
+		int i;
+		for (i = 0; i < pagevec_count(pvec); i++) {
+			struct page *page = pvec->pages[i];
+			if (get_mem_cgroup_from_mm(current->mm) != root_mem_cgroup) {
+				filp->all_accessed_count = 1 + filp->all_accessed_count;
+				if (filp->all_accessed_count >= mapping->nrpages) { //进位
+					atomic_add(1, &(mapping->access_count));
+					filp->all_accessed_count = 0;
+					printk("generic_file_buffered_read jinwei,access_count:%d\n", atomic_read(&mapping->access_count));
+				}
+				if (page->memcg_data !=	(unsigned long)get_mem_cgroup_from_mm(current->mm)) {
+					filp->find_page_count += 1; //访问频次+1
+					if ((filp->find_page_count) >= ((atomic_read(&(mapping->access_count))) + (get_accessed_cgroups(mapping)))) { //迁移
+						printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR dentry.count:%d\n", filp->f_path.dentry->d_lockref.count);
+						if (trylock_page(page)) {
+							mem_cgroup_uncharge(page);
+							mem_cgroup_charge(page, current->mm, mapping_gfp_mask(mapping));
+							// mem_cgroup_try_charge(page,	current->mm, mapping_gfp_mask(mapping),	&cgroup_temp, false);
+							// mem_cgroup_commit_charge(page, cgroup_temp,	false, false);
+							filp->find_page_count =	0;
+							unlock_page(page);
+						}
+					}
+				}
+			}
+		}
+	} ////////////////////////////////////////////
 
 	page = pvec->pages[pagevec_count(pvec) - 1];
 	if (PageReadahead(page)) {
@@ -3066,6 +3129,28 @@ vm_fault_t filemap_fault(struct vm_fault *vmf)
 		 * We found the page, so try async readahead before waiting for
 		 * the lock.
 		 */
+		if(get_mem_cgroup_from_mm(current->mm)!=root_mem_cgroup){
+			file->all_accessed_count=1+file->all_accessed_count;/////////////////////////////////////////////////////////////////////////////
+			if(file->all_accessed_count>=mapping->nrpages){//进位
+					atomic_add(1,&(mapping->access_count));
+					file->all_accessed_count=0;
+					printk("filemap_fault jinwei,access_count:%d",atomic_read(&mapping->access_count));
+			}	
+			if(page->memcg_data!=(unsigned long)get_mem_cgroup_from_mm(current->mm)){	
+				file->find_page_count+=1;//访问频次+1
+				if((file->find_page_count)>=((atomic_read(&(mapping->access_count)))+(get_accessed_cgroups(mapping)))){//迁移
+					printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR dentry.count:%d\n",file->f_path.dentry->d_lockref.count);
+					if(trylock_page(page)){
+						mem_cgroup_uncharge(page);
+						mem_cgroup_charge(page,current->mm,mapping_gfp_mask(mapping));
+						// mem_cgroup_try_charge(page,current->mm,mapping_gfp_mask(mapping),&cgroup_temp,false);
+						// mem_cgroup_commit_charge(page, cgroup_temp, false, false);
+						file->find_page_count=0;
+						unlock_page(page);
+					}
+				}
+			}		
+		}	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 		if (!(vmf->flags & FAULT_FLAG_TRIED))
 			fpin = do_async_mmap_readahead(vmf, page);
 		if (unlikely(!PageUptodate(page))) {
@@ -3327,7 +3412,30 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 
 		if (!pte_none(*vmf->pte))
 			goto unlock;
-
+		
+		if(get_mem_cgroup_from_mm(current->mm)!=root_mem_cgroup){
+			file->all_accessed_count=1+file->all_accessed_count;/////////////////////////////////////////////////////////////////////////////
+			if(file->all_accessed_count>=mapping->nrpages){//进位
+					atomic_add(1,&(mapping->access_count));
+					file->all_accessed_count=0;
+					printk("filemap_fault jinwei,access_count:%d",atomic_read(&mapping->access_count));
+			}	
+			if(page->memcg_data!=(unsigned long)get_mem_cgroup_from_mm(current->mm)){	
+				file->find_page_count+=1;//访问频次+1
+				if((file->find_page_count)>=((atomic_read(&(mapping->access_count)))+(get_accessed_cgroups(mapping)))){//迁移
+					printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR dentry.count:%d\n",file->f_path.dentry->d_lockref.count);
+					if(trylock_page(page)){
+						mem_cgroup_uncharge(page);
+						mem_cgroup_charge(page,current->mm,mapping_gfp_mask(mapping));
+						// mem_cgroup_try_charge(page,current->mm,mapping_gfp_mask(mapping),&cgroup_temp,false);
+						// mem_cgroup_commit_charge(page, cgroup_temp, false, false);
+						file->find_page_count=0;
+						unlock_page(page);
+					}
+				}
+			}		
+		}	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////	
+		
 		/* We're about to handle the fault */
 		if (vmf->address == addr)
 			ret = VM_FAULT_NOPAGE;
@@ -3775,6 +3883,30 @@ again:
 
 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
 						&page, &fsdata);
+		
+		if(get_mem_cgroup_from_mm(current->mm)!=root_mem_cgroup){
+			file->all_accessed_count=1+file->all_accessed_count;/////////////////////////////////////////////////////////////////////////////
+			if(file->all_accessed_count>=mapping->nrpages){//进位
+					atomic_add(1,&(mapping->access_count));
+					file->all_accessed_count=0;
+					printk("filemap_fault jinwei,access_count:%d",atomic_read(&mapping->access_count));
+			}	
+			if(page->memcg_data!=(unsigned long)get_mem_cgroup_from_mm(current->mm)){	
+				file->find_page_count+=1;//访问频次+1
+				if((file->find_page_count)>=((atomic_read(&(mapping->access_count)))+(get_accessed_cgroups(mapping)))){//迁移
+					printk("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR dentry.count:%d\n",file->f_path.dentry->d_lockref.count);
+					if(trylock_page(page)){
+						mem_cgroup_uncharge(page);
+						mem_cgroup_charge(page,current->mm,mapping_gfp_mask(mapping));
+						// mem_cgroup_try_charge(page,current->mm,mapping_gfp_mask(mapping),&cgroup_temp,false);
+						// mem_cgroup_commit_charge(page, cgroup_temp, false, false);
+						file->find_page_count=0;
+						unlock_page(page);
+					}
+				}
+			}		
+		}	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		
 		if (unlikely(status < 0))
 			break;
 

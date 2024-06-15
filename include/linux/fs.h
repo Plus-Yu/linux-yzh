@@ -463,6 +463,9 @@ struct address_space {
 	struct rw_semaphore	invalidate_lock;
 	gfp_t			gfp_mask;
 	atomic_t		i_mmap_writable;
+	atomic_t access_count; //////////////////////
+	//int accessed_cgroups[25]; ///////////////////
+	atomic_t accessed_cgroups[25]; /////////////////
 #ifdef CONFIG_READ_ONLY_THP_FOR_FS
 	/* number of thp, only for non-shmem files */
 	atomic_t		nr_thps;
@@ -971,7 +974,8 @@ struct file {
 	struct path		f_path;
 	struct inode		*f_inode;	/* cached value */
 	const struct file_operations	*f_op;
-
+	long long int find_page_count; /////////////////////////
+	long long int all_accessed_count; ////////////////////////
 	/*
 	 * Protects f_ep, f_flags.
 	 * Must not be taken from IRQ context.
